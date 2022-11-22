@@ -445,6 +445,8 @@ func (s *KVStore) GetTiKVClient() (client Client) {
 func (s *KVStore) GetMinSafeTS(txnScope string) uint64 {
 	stores := make([]*locate.Store, 0)
 	allStores := s.regionCache.GetStoresByType(tikvrpc.TiKV)
+	tiflashStores := s.regionCache.GetStoresByType(tikvrpc.TiFlash)
+	allStores = append(allStores, tiflashStores...)
 	if txnScope != oracle.GlobalTxnScope {
 		for _, store := range allStores {
 			if store.IsLabelsMatch([]*metapb.StoreLabel{
@@ -538,12 +540,17 @@ func (s *KVStore) safeTSUpdater() {
 
 func (s *KVStore) updateSafeTS(ctx context.Context) {
 	stores := s.regionCache.GetStoresByType(tikvrpc.TiKV)
+	tiflashStores := s.regionCache.GetStoresByType(tikvrpc.TiFlash)
+	stores = append(stores, tiflashStores...)
 	tikvClient := s.GetTiKVClient()
 	wg := &sync.WaitGroup{}
 	wg.Add(len(stores))
 	for _, store := range stores {
 		storeID := store.StoreID()
 		storeAddr := store.GetAddr()
+		if store.IsTiFlash() {
+			storeAddr = store.GetPeerAddr()
+		}
 		go func(ctx context.Context, wg *sync.WaitGroup, storeID uint64, storeAddr string) {
 			defer wg.Done()
 			resp, err := tikvClient.SendRequest(ctx, storeAddr, tikvrpc.NewRequest(tikvrpc.CmdStoreSafeTS, &kvrpcpb.StoreSafeTSRequest{KeyRange: &kvrpcpb.KeyRange{
